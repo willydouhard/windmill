@@ -1394,8 +1394,7 @@
 												triggered using a synchronous endpoint to have the desired effect.
 												<br />
 												<br />
-												The logs, arguments and results of the job will be completely deleted from Windmill
-												once it is complete and the result has been returned.
+												Select which data to delete after the job is complete. Deleted data will be completely removed from Windmill.
 												<br />
 												<br />
 												The deletion is irreversible.
@@ -1410,18 +1409,99 @@
 											<Toggle
 												disabled={!$enterpriseLicense}
 												size="sm"
-												checked={Boolean(script.delete_after_use)}
+												checked={Boolean(
+													script.delete_after_use &&
+														(typeof script.delete_after_use === 'boolean'
+															? script.delete_after_use
+															: script.delete_after_use.args ||
+																script.delete_after_use.logs ||
+																script.delete_after_use.results)
+												)}
 												on:change={() => {
 													if (script.delete_after_use) {
 														script.delete_after_use = undefined
 													} else {
-														script.delete_after_use = true
+														script.delete_after_use = { args: true, logs: true, results: true }
 													}
 												}}
 												options={{
-													right: 'Delete logs, arguments and results after use'
+													right: 'Delete after use'
 												}}
 											/>
+
+											{#if script.delete_after_use}
+												<div class="ml-6 flex flex-col gap-1 mt-2">
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="xs"
+														checked={typeof script.delete_after_use === 'boolean'
+															? script.delete_after_use
+															: script.delete_after_use.args || false}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean') {
+																const enabled = script.delete_after_use
+																script.delete_after_use = {
+																	args: enabled,
+																	logs: enabled,
+																	results: enabled
+																}
+															}
+															if (typeof script.delete_after_use === 'object') {
+																script.delete_after_use.args = !script.delete_after_use.args
+															}
+														}}
+														options={{
+															right: 'Delete arguments'
+														}}
+													/>
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="xs"
+														checked={typeof script.delete_after_use === 'boolean'
+															? script.delete_after_use
+															: script.delete_after_use.logs || false}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean') {
+																const enabled = script.delete_after_use
+																script.delete_after_use = {
+																	args: enabled,
+																	logs: enabled,
+																	results: enabled
+																}
+															}
+															if (typeof script.delete_after_use === 'object') {
+																script.delete_after_use.logs = !script.delete_after_use.logs
+															}
+														}}
+														options={{
+															right: 'Delete logs'
+														}}
+													/>
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="xs"
+														checked={typeof script.delete_after_use === 'boolean'
+															? script.delete_after_use
+															: script.delete_after_use.results || false}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean') {
+																const enabled = script.delete_after_use
+																script.delete_after_use = {
+																	args: enabled,
+																	logs: enabled,
+																	results: enabled
+																}
+															}
+															if (typeof script.delete_after_use === 'object') {
+																script.delete_after_use.results = !script.delete_after_use.results
+															}
+														}}
+														options={{
+															right: 'Delete results'
+														}}
+													/>
+												</div>
+											{/if}
 										</div>
 									</Section>
 									{#if !isCloudHosted()}

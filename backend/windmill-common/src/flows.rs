@@ -25,7 +25,7 @@ use crate::{
     db::DB,
     error::Error,
     more_serde::{default_empty_string, default_id, default_null, default_true, is_default},
-    scripts::{Schema, ScriptHash, ScriptLang},
+    scripts::{DeleteAfterUseOptions, Schema, ScriptHash, ScriptLang},
     worker::{to_raw_value, Connection},
 };
 
@@ -384,7 +384,9 @@ pub struct FlowModule {
     // Priority at the flow step level
     pub priority: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[serde(default = "Option::default")]
+    #[serde(deserialize_with = "delete_after_use_deserialize")]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub continue_on_error: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -396,6 +398,57 @@ pub struct FlowModule {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct SkipIf {
     pub expr: String,
+}
+
+fn delete_after_use_deserialize<'de, D>(
+    deserializer: D,
+) -> Result<Option<DeleteAfterUseOptions>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::fmt;
+    struct DeleteAfterUseVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for DeleteAfterUseVisitor {
+        type Value = Option<DeleteAfterUseOptions>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("either a boolean or an object with args, logs, and results fields")
+        }
+
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(DeleteAfterUseOptions::from_bool(v))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let opts = DeleteAfterUseOptions::deserialize(
+                serde::de::value::MapAccessDeserializer::new(map),
+            )?;
+            Ok(Some(opts))
+        }
+    }
+
+    deserializer.deserialize_any(DeleteAfterUseVisitor)
 }
 
 #[derive(Deserialize)]

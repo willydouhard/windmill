@@ -29,6 +29,47 @@ use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize};
 
 use crate::utils::StripPath;
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct DeleteAfterUseOptions {
+    #[serde(default)]
+    pub args: bool,
+    #[serde(default)]
+    pub logs: bool,
+    #[serde(default)]
+    pub results: bool,
+}
+
+impl DeleteAfterUseOptions {
+    pub fn all() -> Self {
+        Self {
+            args: true,
+            logs: true,
+            results: true,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            args: false,
+            logs: false,
+            results: false,
+        }
+    }
+
+    pub fn should_delete_any(&self) -> bool {
+        self.args || self.logs || self.results
+    }
+
+    // For backward compatibility: convert boolean to DeleteAfterUseOptions
+    pub fn from_bool(delete: bool) -> Option<Self> {
+        if delete {
+            Some(Self::all())
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Hash, Eq, sqlx::Type, Default)]
 #[sqlx(type_name = "SCRIPT_LANG", rename_all = "lowercase")]
 #[serde(rename_all(serialize = "lowercase", deserialize = "lowercase"))]
@@ -299,7 +340,8 @@ pub struct Script {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[sqlx(json)]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_unless_cancelled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -406,7 +448,9 @@ pub struct NewScript {
     pub ws_error_handler_muted: Option<bool>,
     pub priority: Option<i16>,
     pub timeout: Option<i32>,
-    pub delete_after_use: Option<bool>,
+    #[serde(default = "Option::default")]
+    #[serde(deserialize_with = "delete_after_use_deserialize")]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     pub restart_unless_cancelled: Option<bool>,
     pub deployment_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -471,6 +515,54 @@ where
         }
     }
     deserializer.deserialize_any(StringOrArrayVisitor)
+}
+
+fn delete_after_use_deserialize<'de, D>(
+    deserializer: D,
+) -> Result<Option<DeleteAfterUseOptions>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    struct DeleteAfterUseVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for DeleteAfterUseVisitor {
+        type Value = Option<DeleteAfterUseOptions>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("either a boolean or an object with args, logs, and results fields")
+        }
+
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(DeleteAfterUseOptions::from_bool(v))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let opts = DeleteAfterUseOptions::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+            Ok(Some(opts))
+        }
+    }
+
+    deserializer.deserialize_any(DeleteAfterUseVisitor)
 }
 
 #[derive(Debug, Deserialize)]

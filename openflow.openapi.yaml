@@ -136,7 +136,9 @@ components:
         timeout:
           $ref: "#/components/schemas/InputTransform"
         delete_after_use:
-          type: boolean
+          oneOf:
+            - type: boolean
+            - $ref: "#/components/schemas/DeleteAfterUseOptions"
         summary:
           type: string
         mock:
@@ -654,3 +656,18 @@ components:
           items:
             type: boolean
       required: [type]
+    DeleteAfterUseOptions:
+      type: object
+      properties:
+        args:
+          type: boolean
+          default: false
+          description: Whether to delete job arguments after use
+        logs:
+          type: boolean
+          default: false
+          description: Whether to delete job logs after use
+        results:
+          type: boolean
+          default: false
+          description: Whether to delete job results after use

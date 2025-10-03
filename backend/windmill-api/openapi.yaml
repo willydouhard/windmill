@@ -14660,7 +14660,9 @@ components:
         timeout:
           type: integer
         delete_after_use:
-          type: boolean
+          oneOf:
+            - type: boolean
+            - $ref: "#/components/schemas/DeleteAfterUseOptions"
         visible_to_runner_only:
           type: boolean
         no_main_func:
@@ -14739,7 +14741,9 @@ components:
         timeout:
           type: integer
         delete_after_use:
-          type: boolean
+          oneOf:
+            - type: boolean
+            - $ref: "#/components/schemas/DeleteAfterUseOptions"
         deployment_message:
           type: string
         concurrency_key:
@@ -18862,3 +18866,18 @@ components:
         kind:
           $ref: "#/components/schemas/AssetKind"
       required: [path, kind]
+    DeleteAfterUseOptions:
+      type: object
+      properties:
+        args:
+          type: boolean
+          default: false
+          description: Whether to delete job arguments after use
+        logs:
+          type: boolean
+          default: false
+          description: Whether to delete job logs after use
+        results:
+          type: boolean
+          default: false
+          description: Whether to delete job results after use
