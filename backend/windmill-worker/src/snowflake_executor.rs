@@ -58,11 +58,17 @@ struct SnowflakeResponse {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(non_snake_case)]
+struct SnowflakeMultiStatementResponse {
+    statementHandles: Vec<String>,
+}
+
+#[derive(Deserialize, Debug)]
 struct SnowflakeDataOnlyResponse {
     data: Vec<Vec<Value>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[allow(non_snake_case)]
 struct SnowflakeResultSetMetaData {
     numRows: i64,
@@ -70,7 +76,7 @@ struct SnowflakeResultSetMetaData {
     partitionInfo: Vec<Value>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct SnowflakeRowType {
     name: String,
     r#type: String,
@@ -404,35 +410,154 @@ pub async fn do_snowflake(
     let http_client = build_http_client(timeout_duration)?;
 
     let result_f = if queries.len() > 1 {
-        let futures = queries
-            .iter()
-            .enumerate()
-            .map(|(i, x)| {
-                do_snowflake_inner(
-                    x,
-                    &snowflake_args,
-                    body.clone(),
-                    &database.account_identifier,
-                    &token,
-                    token_is_keypair,
-                    None,
-                    annotations.return_last_result && i < queries.len() - 1,
-                    &http_client,
-                    s3.clone(),
-                )
-            })
-            .collect::<windmill_common::error::Result<Vec<_>>>()?;
+        // Use multi-statement API to maintain session state across statements
+        // This allows temp tables, session variables, etc. to work properly
 
-        let f = async {
-            let mut res: Vec<Box<RawValue>> = vec![];
-            for fut in futures {
-                let r = fut.await?;
-                res.push(r);
+        // Process each query to handle parameter interpolation
+        let mut processed_queries = Vec::new();
+        for query_block in &queries {
+            let sig = parse_snowflake_sig(query_block)
+                .map_err(|x| Error::ExecutionErr(x.to_string()))?
+                .args;
+
+            let (processed_query, _) = sanitize_and_interpolate_unsafe_sql_args(query_block, &sig, &snowflake_args)?;
+            processed_queries.push(processed_query);
+        }
+
+        // Concatenate all queries with semicolons for multi-statement execution
+        let combined_query = processed_queries.join("; ");
+
+        body.insert("statement".to_string(), json!(combined_query));
+        body.insert(
+            "parameters".to_string(),
+            json!({
+                "MULTI_STATEMENT_COUNT": queries.len().to_string()
+            }),
+        );
+
+        let f = async move {
+            let mut request = http_client
+                .post(format!(
+                    "https://{}.snowflakecomputing.com/api/v2/statements/",
+                    database.account_identifier.to_uppercase()
+                ))
+                .bearer_auth(&token)
+                .json(&body);
+
+            if token_is_keypair {
+                request = request.header("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT");
             }
-            if annotations.return_last_result && res.len() > 0 {
-                Ok(res.pop().unwrap())
+
+            let result = request.send().await;
+            let response = result.parse_snowflake_response::<SnowflakeMultiStatementResponse>().await?;
+
+            // For multi-statement requests, retrieve results for each statement handle
+            let mut results: Vec<Box<RawValue>> = vec![];
+            for (idx, statement_handle) in response.statementHandles.iter().enumerate() {
+                let skip_collect = annotations.return_last_result && idx < response.statementHandles.len() - 1;
+
+                if skip_collect {
+                    // Don't fetch results for intermediate statements if only the last result is needed
+                    results.push(to_raw_value(&Value::Array(vec![])));
+                    continue;
+                }
+
+                let url = format!(
+                    "https://{}.snowflakecomputing.com/api/v2/statements/{}",
+                    database.account_identifier.to_uppercase(),
+                    statement_handle
+                );
+
+                let mut get_request = http_client.get(&url).bearer_auth(&token);
+
+                if token_is_keypair {
+                    get_request =
+                        get_request.header("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT");
+                }
+
+                let statement_result = get_request.send().await;
+                let statement_response = statement_result
+                    .parse_snowflake_response::<SnowflakeResponse>()
+                    .await?;
+
+                if s3.is_none() && statement_response.resultSetMetaData.numRows > 10000 {
+                    return Err(Error::ExecutionErr(
+                        "More than 10000 rows were requested, use LIMIT 10000 to limit the number of rows or use S3 streaming for larger datasets: https://windmill.dev/docs/core_concepts/sql_to_s3_streaming"
+                            .to_string(),
+                    ));
+                }
+
+                // Process results similar to single statement
+                let cloned_account_identifier = database.account_identifier.clone();
+                let cloned_token = token.clone();
+                let cloned_statement_handle = statement_handle.clone();
+
+                let rows_stream = async_stream::stream! {
+                    for row in statement_response.data {
+                        yield Ok::<Vec<Value>, windmill_common::error::Error>(row);
+                    }
+
+                    if statement_response.resultSetMetaData.partitionInfo.len() > 1 {
+                        for partition_idx in 1..statement_response.resultSetMetaData.partitionInfo.len() {
+                            let partition_url = format!(
+                                "https://{}.snowflakecomputing.com/api/v2/statements/{}",
+                                cloned_account_identifier.to_uppercase(),
+                                cloned_statement_handle
+                            );
+                            let mut partition_request = HTTP_CLIENT
+                                .get(partition_url)
+                                .bearer_auth(cloned_token.as_str())
+                                .query(&[("partition", partition_idx.to_string())]);
+
+                            if token_is_keypair {
+                                partition_request = partition_request
+                                    .header("X-Snowflake-Authorization-Token-Type", "KEYPAIR_JWT");
+                            }
+
+                            let partition_response = partition_request
+                                .send()
+                                .await
+                                .parse_snowflake_response::<SnowflakeDataOnlyResponse>()
+                                .await?;
+
+                            for row in partition_response.data {
+                                yield Ok(row);
+                            }
+                        }
+                    }
+                };
+
+                let result_metadata = statement_response.resultSetMetaData.clone();
+                let rows_stream = rows_stream.map_ok(move |row| {
+                    let mut row_map = serde_json::Map::new();
+                    row.iter()
+                        .zip(result_metadata.rowType.iter())
+                        .for_each(|(val, row_type)| {
+                            row_map.insert(row_type.name.clone(), parse_val(&val, &row_type.r#type));
+                        });
+                    row_map
+                });
+
+                if let Some(ref s3) = s3 {
+                    let rows_stream =
+                        rows_stream.map(|r| serde_json::value::to_value(&r?).map_err(to_anyhow));
+                    let stream = convert_json_line_stream(rows_stream.boxed(), s3.format).await?;
+                    s3.upload(stream.boxed()).await?;
+                    results.push(to_raw_value(&s3.to_return_s3_obj()));
+                } else {
+                    let rows = rows_stream
+                        .collect::<Vec<_>>()
+                        .await
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()?;
+                    results.push(to_raw_value(&rows));
+                }
+            }
+
+            if annotations.return_last_result && results.len() > 0 {
+                Ok(results.pop().unwrap())
             } else {
-                Ok(to_raw_value(&res))
+                Ok(to_raw_value(&results))
             }
         };
 
