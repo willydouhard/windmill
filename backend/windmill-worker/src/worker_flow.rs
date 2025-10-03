@@ -1409,29 +1409,79 @@ pub async fn update_flow_status_after_job_completion_internal(
             }
         } else {
             // run the cleanup step only when the root job is complete
-            if !_cleanup_module.flow_jobs_to_clean.is_empty() {
+            if !_cleanup_module.flow_jobs_to_clean.is_empty() || !_cleanup_module.flow_jobs_to_clean_with_options.is_empty() {
+                use windmill_common::flows::DeleteAfterUseOptions;
+
+                // Collect jobs to clean by type
+                let mut jobs_to_clean_args: Vec<Uuid> = Vec::new();
+                let mut jobs_to_clean_logs: Vec<Uuid> = Vec::new();
+                let mut jobs_to_clean_result: Vec<Uuid> = Vec::new();
+
+                // Process new granular options
+                for (job_id, options) in _cleanup_module.flow_jobs_to_clean_with_options.iter() {
+                    if options.delete_args() {
+                        jobs_to_clean_args.push(*job_id);
+                    }
+                    if options.delete_logs() {
+                        jobs_to_clean_logs.push(*job_id);
+                    }
+                    if options.delete_result() {
+                        jobs_to_clean_result.push(*job_id);
+                    }
+                }
+
+                // Legacy: jobs in flow_jobs_to_clean (not in with_options) should delete everything
+                for job_id in _cleanup_module.flow_jobs_to_clean.iter() {
+                    if !_cleanup_module.flow_jobs_to_clean_with_options.contains_key(job_id) {
+                        jobs_to_clean_args.push(*job_id);
+                        jobs_to_clean_logs.push(*job_id);
+                        jobs_to_clean_result.push(*job_id);
+                    }
+                }
+
                 tracing::debug!(
-                     "Cleaning up jobs arguments, result and logs as they were marked as delete_after_use {:?}",
-                     _cleanup_module.flow_jobs_to_clean
+                     "Cleaning up jobs as marked by delete_after_use - args: {:?}, logs: {:?}, result: {:?}",
+                     jobs_to_clean_args, jobs_to_clean_logs, jobs_to_clean_result
                  );
-                sqlx::query!(
-                    "UPDATE v2_job SET args = '{}'::jsonb WHERE id = ANY($1)",
-                    &_cleanup_module.flow_jobs_to_clean,
-                )
-                .execute(db)
-                .await
-                .map_err(|e| {
-                    Error::InternalErr(format!("error while cleaning up completed job: {e:#}"))
-                })?;
-                sqlx::query!(
-                    "UPDATE v2_job_completed SET result = '{}'::jsonb WHERE id = ANY($1)",
-                    &_cleanup_module.flow_jobs_to_clean,
-                )
-                .execute(db)
-                .await
-                .map_err(|e| {
-                    Error::internal_err(format!("error while cleaning up completed job: {e:#}"))
-                })?;
+
+                // Clean up args
+                if !jobs_to_clean_args.is_empty() {
+                    sqlx::query!(
+                        "UPDATE v2_job SET args = '{}'::jsonb WHERE id = ANY($1)",
+                        &jobs_to_clean_args,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::InternalErr(format!("error while cleaning up job args: {e:#}"))
+                    })?;
+                }
+
+                // Clean up logs
+                if !jobs_to_clean_logs.is_empty() {
+                    sqlx::query!(
+                        "DELETE FROM job_logs WHERE job_id = ANY($1)",
+                        &jobs_to_clean_logs,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::InternalErr(format!("error while cleaning up job logs: {e:#}"))
+                    })?;
+                }
+
+                // Clean up result
+                if !jobs_to_clean_result.is_empty() {
+                    sqlx::query!(
+                        "UPDATE v2_job_completed SET result = '{}'::jsonb WHERE id = ANY($1)",
+                        &jobs_to_clean_result,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::internal_err(format!("error while cleaning up job result: {e:#}"))
+                    })?;
+                }
             }
         }
 
@@ -3193,6 +3243,9 @@ async fn push_next_flow_job(
         }
 
         if payload_tag.delete_after_use {
+            let delete_options = payload_tag.get_delete_options();
+
+            // For backward compatibility, also add to the old flow_jobs_to_clean array
             let uuid_singleton_json = serde_json::to_value(&[uuid]).map_err(|e| {
                 error::Error::internal_err(format!("Unable to serialize uuid: {e:#}"))
             })?;
@@ -3202,6 +3255,28 @@ async fn push_next_flow_job(
                  SET flow_status = JSONB_SET(flow_status, ARRAY['cleanup_module', 'flow_jobs_to_clean'], COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean', '[]'::jsonb) || $1)
                  WHERE id = $2",
                  uuid_singleton_json,
+                 flow_innermost_root_job.unwrap_or(flow_job.id)
+             )
+             .execute(&mut *inner_tx)
+             .warn_after_seconds(3)
+             .await?;
+
+            // Store granular delete options in the new map
+            let uuid_str = uuid.to_string();
+            let options_json = serde_json::to_value(&delete_options).map_err(|e| {
+                error::Error::internal_err(format!("Unable to serialize delete options: {e:#}"))
+            })?;
+
+            sqlx::query!(
+                 "UPDATE v2_job_status
+                 SET flow_status = JSONB_SET(
+                     flow_status,
+                     ARRAY['cleanup_module', 'flow_jobs_to_clean_with_options'],
+                     COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean_with_options', '{}'::jsonb) || jsonb_build_object($1, $2)
+                 )
+                 WHERE id = $3",
+                 uuid_str,
+                 options_json,
                  flow_innermost_root_job.unwrap_or(flow_job.id)
              )
              .execute(&mut *inner_tx)
@@ -3546,9 +3621,24 @@ pub struct JobPayloadWithTag {
     pub payload: JobPayload,
     pub tag: Option<String>,
     pub delete_after_use: bool,
+    pub delete_after_use_options: Option<windmill_common::flows::DeleteAfterUseOptions>,
     pub timeout: Option<i32>,
     pub on_behalf_of: Option<OnBehalfOf>,
 }
+
+impl JobPayloadWithTag {
+    /// Get the delete_after_use_options, or create default from boolean if not set
+    pub fn get_delete_options(&self) -> windmill_common::flows::DeleteAfterUseOptions {
+        self.delete_after_use_options.clone().unwrap_or(
+            if self.delete_after_use {
+                windmill_common::flows::DeleteAfterUseOptions::Boolean(true)
+            } else {
+                windmill_common::flows::DeleteAfterUseOptions::None
+            }
+        )
+    }
+}
+
 enum ContinuePayload {
     SingleJob(JobPayloadWithTag),
     ParallelJobs(Vec<JobPayloadWithTag>),
@@ -3644,6 +3734,7 @@ async fn compute_next_flow_transform(
                 payload: JobPayload::Identity,
                 tag: None,
                 delete_after_use: false,
+                delete_after_use_options: None,
                 timeout: None,
                 on_behalf_of: None,
             }),
@@ -3656,6 +3747,7 @@ async fn compute_next_flow_transform(
                 payload,
                 tag: None,
                 delete_after_use: false,
+                delete_after_use_options: None,
                 timeout: None,
                 on_behalf_of: None,
             }),
@@ -3687,6 +3779,7 @@ async fn compute_next_flow_transform(
                     payload,
                     tag: None,
                     delete_after_use,
+                    delete_after_use_options: None,
                     timeout: None,
                     on_behalf_of: None,
                 }),
@@ -3763,6 +3856,7 @@ async fn compute_next_flow_transform(
                 },
                 tag: tag.clone(),
                 delete_after_use,
+                delete_after_use_options: None,
                 timeout: None,
                 on_behalf_of: None,
             };
@@ -3896,6 +3990,7 @@ async fn compute_next_flow_transform(
                                 payload,
                                 tag: None,
                                 delete_after_use,
+                                delete_after_use_options: None,
                                 timeout: None,
                                 on_behalf_of: None,
                             })
@@ -3988,6 +4083,7 @@ async fn compute_next_flow_transform(
                     payload,
                     tag: None,
                     delete_after_use,
+                    delete_after_use_options: None,
                     timeout: None,
                     on_behalf_of: None,
                 }),
@@ -4023,6 +4119,7 @@ async fn compute_next_flow_transform(
                                         payload,
                                         tag: None,
                                         delete_after_use,
+                                        delete_after_use_options: None,
                                         timeout: None,
                                         on_behalf_of: None,
                                     })
@@ -4101,6 +4198,7 @@ async fn compute_next_flow_transform(
                     payload,
                     tag: None,
                     delete_after_use,
+                    delete_after_use_options: None,
                     timeout: None,
                     on_behalf_of: None,
                 }),
@@ -4164,6 +4262,7 @@ async fn next_loop_iteration(
             payload,
             tag: None,
             delete_after_use,
+            delete_after_use_options: None,
             timeout: None,
             on_behalf_of: None,
         }),
@@ -4398,6 +4497,7 @@ async fn payload_from_simple_module(
             },
             tag,
             delete_after_use,
+            delete_after_use_options: None,
             timeout: None, // timeout evaluation handled at higher level
             on_behalf_of: None,
         },
@@ -4432,6 +4532,7 @@ pub fn raw_script_to_payload(
         }),
         tag,
         delete_after_use,
+        delete_after_use_options: None,
         timeout: None, // timeout evaluation handled at higher level
         on_behalf_of: None,
     }
@@ -4452,7 +4553,7 @@ async fn flow_to_payload(
     };
     let payload =
         JobPayload::Flow { path, dedicated_worker: None, apply_preprocessor: false, version };
-    Ok(JobPayloadWithTag { payload, tag, delete_after_use, timeout: None, on_behalf_of })
+    Ok(JobPayloadWithTag { payload, tag, delete_after_use, delete_after_use_options: None, timeout: None, on_behalf_of })
 }
 
 pub async fn script_to_payload(
@@ -4544,6 +4645,7 @@ pub async fn script_to_payload(
         payload,
         tag,
         delete_after_use: final_delete_after_user,
+                delete_after_use_options: None,
         timeout: flow_step_timeout,
         on_behalf_of,
     })

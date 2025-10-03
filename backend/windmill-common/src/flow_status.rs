@@ -111,6 +111,9 @@ pub struct FlowCleanupModule {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub flow_jobs_to_clean: Vec<Uuid>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub flow_jobs_to_clean_with_options: std::collections::HashMap<uuid::Uuid, crate::flows::DeleteAfterUseOptions>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -503,7 +506,10 @@ impl FlowStatus {
             } else {
                 None
             },
-            cleanup_module: FlowCleanupModule { flow_jobs_to_clean: vec![] },
+            cleanup_module: FlowCleanupModule {
+                flow_jobs_to_clean: vec![],
+                flow_jobs_to_clean_with_options: std::collections::HashMap::new(),
+            },
             retry: RetryStatus { fail_count: 0, failed_jobs: vec![] },
             restarted_from: None,
             user_states: HashMap::new(),
