@@ -132,6 +132,7 @@ fn do_snowflake_inner<'a>(
     skip_collect: bool,
     http_client: &'a Client,
     s3: Option<S3ModeWorkerData>,
+    request_id: Option<&'a str>,
 ) -> windmill_common::error::Result<BoxFuture<'a, windmill_common::error::Result<Box<RawValue>>>> {
     let sig = parse_snowflake_sig(&query)
         .map_err(|x| Error::ExecutionErr(x.to_string()))?
@@ -158,6 +159,11 @@ fn do_snowflake_inner<'a>(
 
     if i > 1 {
         body.insert("bindings".to_string(), json!(bindings));
+    }
+
+    // Add requestId to reuse the same session for temp tables and session variables
+    if let Some(request_id) = request_id {
+        body.insert("requestId".to_string(), json!(request_id));
     }
 
     let result_f = async move {
@@ -398,10 +404,31 @@ pub async fn do_snowflake(
 
     let queries = parse_sql_blocks(query);
 
+    if queries.is_empty() {
+        return Err(Error::ExecutionErr(
+            "No SQL statements found to execute".to_string(),
+        ));
+    }
+
     let (timeout_duration, _, _) =
         resolve_job_timeout(&conn, &job.workspace_id, job.id, job.timeout).await;
 
     let http_client = build_http_client(timeout_duration)?;
+
+    // Generate a unique session ID for multi-statement scripts to enable temp tables and session variables.
+    // By using the same requestId across all statements, Snowflake will reuse the same session,
+    // allowing features like temporary tables and session variables to work across statements.
+    // For example:
+    //   CREATE TEMPORARY TABLE temp_data (id INT, name VARCHAR);
+    //   INSERT INTO temp_data VALUES (1, 'test');
+    //   SELECT * FROM temp_data;
+    let session_id = if queries.len() > 1 {
+        let id = format!("windmill-{}", job.id);
+        tracing::debug!("Using session ID for multi-statement Snowflake script: {}", id);
+        Some(id)
+    } else {
+        None
+    };
 
     let result_f = if queries.len() > 1 {
         let futures = queries
@@ -419,17 +446,21 @@ pub async fn do_snowflake(
                     annotations.return_last_result && i < queries.len() - 1,
                     &http_client,
                     s3.clone(),
+                    session_id.as_deref(),
                 )
             })
             .collect::<windmill_common::error::Result<Vec<_>>>()?;
 
         let f = async {
+            // Execute statements sequentially to maintain session state
+            // (e.g., temp tables, session variables). Parallel execution would
+            // break session continuity.
             let mut res: Vec<Box<RawValue>> = vec![];
             for fut in futures {
                 let r = fut.await?;
                 res.push(r);
             }
-            if annotations.return_last_result && res.len() > 0 {
+            if annotations.return_last_result && !res.is_empty() {
                 Ok(res.pop().unwrap())
             } else {
                 Ok(to_raw_value(&res))
@@ -449,6 +480,7 @@ pub async fn do_snowflake(
             false,
             &http_client,
             s3.clone(),
+            None, // No session_id needed for single statement
         )?
     };
     let r = run_future_with_polling_update_job_poller(
