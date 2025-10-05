@@ -308,8 +308,6 @@ pub async fn do_snowflake(
         return Err(Error::BadRequest("Missing database argument".to_string()));
     };
 
-    let annotations = windmill_common::worker::SqlAnnotations::parse(query);
-
     // Check if the token is present in db_arg and use it if available
     let (token, token_is_keypair) = if let Some(token) = db_arg
         .as_ref()
@@ -396,61 +394,25 @@ pub async fn do_snowflake(
         .as_secs();
     body.insert("timeout".to_string(), json!(timeout));
 
-    let queries = parse_sql_blocks(query);
-
     let (timeout_duration, _, _) =
         resolve_job_timeout(&conn, &job.workspace_id, job.id, job.timeout).await;
 
     let http_client = build_http_client(timeout_duration)?;
 
-    let result_f = if queries.len() > 1 {
-        let futures = queries
-            .iter()
-            .enumerate()
-            .map(|(i, x)| {
-                do_snowflake_inner(
-                    x,
-                    &snowflake_args,
-                    body.clone(),
-                    &database.account_identifier,
-                    &token,
-                    token_is_keypair,
-                    None,
-                    annotations.return_last_result && i < queries.len() - 1,
-                    &http_client,
-                    s3.clone(),
-                )
-            })
-            .collect::<windmill_common::error::Result<Vec<_>>>()?;
-
-        let f = async {
-            let mut res: Vec<Box<RawValue>> = vec![];
-            for fut in futures {
-                let r = fut.await?;
-                res.push(r);
-            }
-            if annotations.return_last_result && res.len() > 0 {
-                Ok(res.pop().unwrap())
-            } else {
-                Ok(to_raw_value(&res))
-            }
-        };
-
-        f.boxed()
-    } else {
-        do_snowflake_inner(
-            query,
-            &snowflake_args,
-            body.clone(),
-            &database.account_identifier,
-            &token,
-            token_is_keypair,
-            Some(column_order),
-            false,
-            &http_client,
-            s3.clone(),
-        )?
-    };
+    // Always send the full query as-is to Snowflake to enable session reuse
+    // This allows temp tables and session variables to work across statements
+    let result_f = do_snowflake_inner(
+        query,
+        &snowflake_args,
+        body.clone(),
+        &database.account_identifier,
+        &token,
+        token_is_keypair,
+        Some(column_order),
+        false,
+        &http_client,
+        s3.clone(),
+    )?;
     let r = run_future_with_polling_update_job_poller(
         job.id,
         job.timeout,
