@@ -136,7 +136,7 @@ components:
         timeout:
           $ref: "#/components/schemas/InputTransform"
         delete_after_use:
-          type: boolean
+          $ref: "#/components/schemas/DeleteAfterUseConfig"
         summary:
           type: string
         mock:
@@ -654,3 +654,16 @@ components:
           items:
             type: boolean
       required: [type]
+    DeleteAfterUseConfig:
+      type: object
+      description: Configuration for selective deletion of job data after use
+      properties:
+        args:
+          type: boolean
+          description: Whether to delete the job arguments
+        logs:
+          type: boolean
+          description: Whether to delete the job logs
+        results:
+          type: boolean
+          description: Whether to delete the job results

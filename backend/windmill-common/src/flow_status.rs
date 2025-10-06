@@ -111,6 +111,9 @@ pub struct FlowCleanupModule {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub flow_jobs_to_clean: Vec<Uuid>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub delete_configs: std::collections::HashMap<String, crate::scripts::DeleteAfterUseConfig>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

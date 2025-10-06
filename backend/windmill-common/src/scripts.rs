@@ -211,6 +211,61 @@ impl Display for ScriptKind {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default)]
+pub struct DeleteAfterUseConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub results: Option<bool>,
+}
+
+impl DeleteAfterUseConfig {
+    pub fn all() -> Self {
+        Self {
+            args: Some(true),
+            logs: Some(true),
+            results: Some(true),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.args.is_none() && self.logs.is_none() && self.results.is_none()
+    }
+
+    pub fn should_delete_args(&self) -> bool {
+        self.args.unwrap_or(false)
+    }
+
+    pub fn should_delete_logs(&self) -> bool {
+        self.logs.unwrap_or(false)
+    }
+
+    pub fn should_delete_results(&self) -> bool {
+        self.results.unwrap_or(false)
+    }
+
+    pub fn has_any_deletion(&self) -> bool {
+        self.should_delete_args() || self.should_delete_logs() || self.should_delete_results()
+    }
+
+    // For backward compatibility: convert from boolean
+    pub fn from_bool(delete: bool) -> Option<Self> {
+        if delete {
+            Some(Self::all())
+        } else {
+            None
+        }
+    }
+
+    // For backward compatibility: convert to boolean (true if any deletion is enabled)
+    pub fn to_bool(&self) -> bool {
+        self.has_any_deletion()
+    }
+}
+
 const PREVIEW_IS_CODEBASE_HASH: i64 = -42;
 const PREVIEW_IS_TAR_CODEBASE_HASH: i64 = -43;
 const PREVIEW_IS_ESM_CODEBASE_HASH: i64 = -44;
@@ -299,7 +354,8 @@ pub struct Script {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[sqlx(json(nullable))]
+    pub delete_after_use: Option<DeleteAfterUseConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_unless_cancelled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -406,7 +462,7 @@ pub struct NewScript {
     pub ws_error_handler_muted: Option<bool>,
     pub priority: Option<i16>,
     pub timeout: Option<i32>,
-    pub delete_after_use: Option<bool>,
+    pub delete_after_use: Option<DeleteAfterUseConfig>,
     pub restart_unless_cancelled: Option<bool>,
     pub deployment_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1411,27 +1411,75 @@ pub async fn update_flow_status_after_job_completion_internal(
             // run the cleanup step only when the root job is complete
             if !_cleanup_module.flow_jobs_to_clean.is_empty() {
                 tracing::debug!(
-                     "Cleaning up jobs arguments, result and logs as they were marked as delete_after_use {:?}",
+                     "Cleaning up jobs as they were marked as delete_after_use {:?}",
                      _cleanup_module.flow_jobs_to_clean
                  );
-                sqlx::query!(
-                    "UPDATE v2_job SET args = '{}'::jsonb WHERE id = ANY($1)",
-                    &_cleanup_module.flow_jobs_to_clean,
-                )
-                .execute(db)
-                .await
-                .map_err(|e| {
-                    Error::InternalErr(format!("error while cleaning up completed job: {e:#}"))
-                })?;
-                sqlx::query!(
-                    "UPDATE v2_job_completed SET result = '{}'::jsonb WHERE id = ANY($1)",
-                    &_cleanup_module.flow_jobs_to_clean,
-                )
-                .execute(db)
-                .await
-                .map_err(|e| {
-                    Error::internal_err(format!("error while cleaning up completed job: {e:#}"))
-                })?;
+
+                // Group jobs by what needs to be deleted
+                let mut jobs_to_delete_args: Vec<Uuid> = vec![];
+                let mut jobs_to_delete_logs: Vec<Uuid> = vec![];
+                let mut jobs_to_delete_results: Vec<Uuid> = vec![];
+
+                for job_id in &_cleanup_module.flow_jobs_to_clean {
+                    if let Some(config) = _cleanup_module.delete_configs.get(&job_id.to_string()) {
+                        if config.should_delete_args() {
+                            jobs_to_delete_args.push(*job_id);
+                        }
+                        if config.should_delete_logs() {
+                            jobs_to_delete_logs.push(*job_id);
+                        }
+                        if config.should_delete_results() {
+                            jobs_to_delete_results.push(*job_id);
+                        }
+                    } else {
+                        // Backward compatibility: if no config found, delete all (old behavior)
+                        jobs_to_delete_args.push(*job_id);
+                        jobs_to_delete_logs.push(*job_id);
+                        jobs_to_delete_results.push(*job_id);
+                    }
+                }
+
+                // Delete args
+                if !jobs_to_delete_args.is_empty() {
+                    tracing::debug!("Deleting args for jobs: {:?}", jobs_to_delete_args);
+                    sqlx::query!(
+                        "UPDATE v2_job SET args = '{}'::jsonb WHERE id = ANY($1)",
+                        &jobs_to_delete_args,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::InternalErr(format!("error while cleaning up job args: {e:#}"))
+                    })?;
+                }
+
+                // Delete results
+                if !jobs_to_delete_results.is_empty() {
+                    tracing::debug!("Deleting results for jobs: {:?}", jobs_to_delete_results);
+                    sqlx::query!(
+                        "UPDATE v2_job_completed SET result = '{}'::jsonb WHERE id = ANY($1)",
+                        &jobs_to_delete_results,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::internal_err(format!("error while cleaning up job results: {e:#}"))
+                    })?;
+                }
+
+                // Delete logs
+                if !jobs_to_delete_logs.is_empty() {
+                    tracing::debug!("Deleting logs for jobs: {:?}", jobs_to_delete_logs);
+                    sqlx::query!(
+                        "DELETE FROM job_logs WHERE job_id = ANY($1)",
+                        &jobs_to_delete_logs,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::internal_err(format!("error while cleaning up job logs: {e:#}"))
+                    })?;
+                }
             }
         }
 
@@ -3192,21 +3240,48 @@ async fn push_next_flow_job(
             }
         }
 
-        if payload_tag.delete_after_use {
-            let uuid_singleton_json = serde_json::to_value(&[uuid]).map_err(|e| {
-                error::Error::internal_err(format!("Unable to serialize uuid: {e:#}"))
-            })?;
+        if let Some(delete_config) = &payload_tag.delete_after_use {
+            if delete_config.has_any_deletion() {
+                let uuid_singleton_json = serde_json::to_value(&[uuid]).map_err(|e| {
+                    error::Error::internal_err(format!("Unable to serialize uuid: {e:#}"))
+                })?;
 
-            sqlx::query!(
-                 "UPDATE v2_job_status
-                 SET flow_status = JSONB_SET(flow_status, ARRAY['cleanup_module', 'flow_jobs_to_clean'], COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean', '[]'::jsonb) || $1)
-                 WHERE id = $2",
-                 uuid_singleton_json,
-                 flow_innermost_root_job.unwrap_or(flow_job.id)
-             )
-             .execute(&mut *inner_tx)
-             .warn_after_seconds(3)
-             .await?;
+                sqlx::query!(
+                     "UPDATE v2_job_status
+                     SET flow_status = JSONB_SET(flow_status, ARRAY['cleanup_module', 'flow_jobs_to_clean'], COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean', '[]'::jsonb) || $1)
+                     WHERE id = $2",
+                     uuid_singleton_json,
+                     flow_innermost_root_job.unwrap_or(flow_job.id)
+                 )
+                 .execute(&mut *inner_tx)
+                 .warn_after_seconds(3)
+                 .await?;
+
+                // Store the delete configuration for this job
+                let delete_config_json = serde_json::to_value(delete_config).map_err(|e| {
+                    error::Error::internal_err(format!("Unable to serialize delete config: {e:#}"))
+                })?;
+
+                sqlx::query!(
+                     "UPDATE v2_job_status
+                     SET flow_status = JSONB_SET(
+                         JSONB_SET(
+                             flow_status,
+                             ARRAY['cleanup_module', 'delete_configs'],
+                             COALESCE(flow_status->'cleanup_module'->'delete_configs', '{}'::jsonb)
+                         ),
+                         ARRAY['cleanup_module', 'delete_configs', $1::text],
+                         $2
+                     )
+                     WHERE id = $3",
+                     uuid.to_string(),
+                     delete_config_json,
+                     flow_innermost_root_job.unwrap_or(flow_job.id)
+                 )
+                 .execute(&mut *inner_tx)
+                 .warn_after_seconds(3)
+                 .await?;
+            }
         }
 
         tx = inner_tx;
@@ -3545,7 +3620,7 @@ enum NextStatus {
 pub struct JobPayloadWithTag {
     pub payload: JobPayload,
     pub tag: Option<String>,
-    pub delete_after_use: bool,
+    pub delete_after_use: Option<windmill_common::scripts::DeleteAfterUseConfig>,
     pub timeout: Option<i32>,
     pub on_behalf_of: Option<OnBehalfOf>,
 }
@@ -3643,7 +3718,7 @@ async fn compute_next_flow_transform(
             ContinuePayload::SingleJob(JobPayloadWithTag {
                 payload: JobPayload::Identity,
                 tag: None,
-                delete_after_use: false,
+                delete_after_use: None,
                 timeout: None,
                 on_behalf_of: None,
             }),
@@ -3655,14 +3730,14 @@ async fn compute_next_flow_transform(
             ContinuePayload::SingleJob(JobPayloadWithTag {
                 payload,
                 tag: None,
-                delete_after_use: false,
+                delete_after_use: None,
                 timeout: None,
                 on_behalf_of: None,
             }),
             NextStatus::NextStep,
         ))
     };
-    let delete_after_use = module.delete_after_use.unwrap_or(false);
+    let delete_after_use = module.delete_after_use.clone();
 
     tracing::debug!(id = %flow_job.id, "computing next flow transform for {:?}", &module.value);
     if is_skipped {
@@ -4439,7 +4514,7 @@ pub fn raw_script_to_payload(
 
 async fn flow_to_payload(
     path: String,
-    delete_after_use: bool,
+    delete_after_use: Option<windmill_common::scripts::DeleteAfterUseConfig>,
     w_id: &str,
     db: &DB,
 ) -> Result<JobPayloadWithTag, Error> {
@@ -4531,9 +4606,21 @@ pub async fn script_to_payload(
             on_behalf_of,
         )
     };
-    // the module value overrides the value set at the script level. Defaults to false if both are unset.
-    let final_delete_after_user =
-        module.delete_after_use.unwrap_or(false) || delete_after_use.unwrap_or(false);
+    // the module value overrides the value set at the script level. Defaults to None if both are unset.
+    // Merge configs: module config takes precedence, then script config
+    let final_delete_after_use = match (&module.delete_after_use, &delete_after_use) {
+        (Some(module_config), Some(script_config)) => {
+            // Module config overrides script config per field
+            Some(windmill_common::scripts::DeleteAfterUseConfig {
+                args: module_config.args.or(script_config.args),
+                logs: module_config.logs.or(script_config.logs),
+                results: module_config.results.or(script_config.results),
+            })
+        }
+        (Some(module_config), None) => Some(module_config.clone()),
+        (None, Some(script_config)) => Some(script_config.clone()),
+        (None, None) => None,
+    };
 
     let flow_step_timeout = if module.timeout.is_some() {
         None
@@ -4543,7 +4630,7 @@ pub async fn script_to_payload(
     Ok(JobPayloadWithTag {
         payload,
         tag,
-        delete_after_use: final_delete_after_user,
+        delete_after_use: final_delete_after_use,
         timeout: flow_step_timeout,
         on_behalf_of,
     })

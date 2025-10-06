@@ -507,7 +507,7 @@ pub struct ScriptHashInfo {
     pub language: ScriptLang,
     pub dedicated_worker: Option<bool>,
     pub priority: Option<i16>,
-    pub delete_after_use: Option<bool>,
+    pub delete_after_use: Option<scripts::DeleteAfterUseConfig>,
     pub timeout: Option<i32>,
     pub has_preprocessor: Option<bool>,
     pub on_behalf_of_email: Option<String>,

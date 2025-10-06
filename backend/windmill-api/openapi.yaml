@@ -14660,7 +14660,7 @@ components:
         timeout:
           type: integer
         delete_after_use:
-          type: boolean
+          $ref: "../../openflow.openapi.yaml#/components/schemas/DeleteAfterUseConfig"
         visible_to_runner_only:
           type: boolean
         no_main_func:
@@ -14739,7 +14739,7 @@ components:
         timeout:
           type: integer
         delete_after_use:
-          type: boolean
+          $ref: "../../openflow.openapi.yaml#/components/schemas/DeleteAfterUseConfig"
         deployment_message:
           type: string
         concurrency_key:
