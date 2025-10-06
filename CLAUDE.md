@@ -19,3 +19,5 @@ When implementing new features in Windmill, follow these best practices:
 
 - Backend (Rust): @backend/rust-best-practices.mdc + @backend/summarized_schema.txt
 - Frontend (Svelte 5): @frontend/svelte5-best-practices.mdc
+
+IMPORTANT: Use Context7 for code generation, setup or configuration steps, or library/API documentation. Automatically use the Context7 MCP tools to resolve library IDs and get library docs without waiting for explicit requests.
