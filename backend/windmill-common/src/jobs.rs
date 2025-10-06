@@ -476,7 +476,7 @@ pub async fn script_path_to_payload<'e>(
 ) -> error::Result<(
     JobPayload,
     Option<Tag>,
-    Option<bool>,
+    Option<crate::scripts::DeleteAfterUseOptions>,
     Option<i32>,
     Option<OnBehalfOf>,
 )> {

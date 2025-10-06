@@ -14400,6 +14400,8 @@ components:
       $ref: "../../openflow.openapi.yaml#/components/schemas/OpenFlow"
     FlowValue:
       $ref: "../../openflow.openapi.yaml#/components/schemas/FlowValue"
+    DeleteAfterUseOptions:
+      $ref: "../../openflow.openapi.yaml#/components/schemas/DeleteAfterUseOptions"
     Retry:
       $ref: "../../openflow.openapi.yaml#/components/schemas/Retry"
     StopAfterIf:
@@ -14660,7 +14662,7 @@ components:
         timeout:
           type: integer
         delete_after_use:
-          type: boolean
+          $ref: "#/components/schemas/DeleteAfterUseOptions"
         visible_to_runner_only:
           type: boolean
         no_main_func:
@@ -14739,7 +14741,7 @@ components:
         timeout:
           type: integer
         delete_after_use:
-          type: boolean
+          $ref: "#/components/schemas/DeleteAfterUseOptions"
         deployment_message:
           type: string
         concurrency_key:

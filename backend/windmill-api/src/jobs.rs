@@ -4220,7 +4220,9 @@ pub async fn run_script_by_path_inner(
     .await?;
     tx.commit().await?;
 
-    Ok((uuid, delete_after_use))
+    // Convert DeleteAfterUseOptions to bool for backward compatibility
+    let delete_after_use_bool = delete_after_use.as_ref().map(|opts| !opts.is_empty());
+    Ok((uuid, delete_after_use_bool))
 }
 
 #[derive(Deserialize)]
@@ -4916,7 +4918,7 @@ pub async fn run_wait_result_job_by_path_get(
     tx.commit().await?;
 
     let wait_result = run_wait_result(&db, uuid, w_id, None, &authed.username).await;
-    if delete_after_use.unwrap_or(false) {
+    if delete_after_use.as_ref().is_some_and(|opts| !opts.is_empty()) {
         delete_job_metadata_after_use(&db, uuid).await?;
     }
     return wait_result;
@@ -5068,7 +5070,7 @@ pub async fn run_wait_result_script_by_path_internal(
     tx.commit().await?;
 
     let wait_result = run_wait_result(&db, uuid, w_id, None, &authed.username).await;
-    if delete_after_use.unwrap_or(false) {
+    if delete_after_use.as_ref().is_some_and(|opts| !opts.is_empty()) {
         delete_job_metadata_after_use(&db, uuid).await?;
     }
     return wait_result;
@@ -5184,7 +5186,7 @@ pub async fn run_wait_result_script_by_hash(
     tx.commit().await?;
 
     let wait_result = run_wait_result(&db, uuid, w_id, None, &authed.username).await;
-    if delete_after_use.unwrap_or(false) {
+    if delete_after_use.as_ref().is_some_and(|opts| !opts.is_empty()) {
         delete_job_metadata_after_use(&db, uuid).await?;
     }
     return wait_result;
@@ -6518,7 +6520,9 @@ pub async fn run_job_by_hash_inner(
     .await?;
     tx.commit().await?;
 
-    Ok((uuid, delete_after_use))
+    // Convert DeleteAfterUseOptions to bool for backward compatibility
+    let delete_after_use_bool = delete_after_use.as_ref().map(|opts| !opts.is_empty());
+    Ok((uuid, delete_after_use_bool))
 }
 
 #[derive(Deserialize)]

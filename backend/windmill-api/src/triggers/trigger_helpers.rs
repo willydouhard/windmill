@@ -861,5 +861,7 @@ async fn trigger_script_with_retry_and_error_handler(
     .await?;
     tx.commit().await?;
 
-    Ok((uuid, delete_after_use))
+    // Convert DeleteAfterUseOptions to bool for backward compatibility
+    let delete_after_use_bool = delete_after_use.as_ref().map(|opts| !opts.is_empty());
+    Ok((uuid, delete_after_use_bool))
 }

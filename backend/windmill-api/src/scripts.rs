@@ -99,7 +99,8 @@ pub struct ScriptWDraft {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_unless_cancelled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[sqlx(json)]
+    pub delete_after_use: Option<windmill_common::scripts::DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -766,7 +767,7 @@ async fn create_script_internal<'c>(
          draft_only, envs, concurrent_limit, concurrency_time_window_s, cache_ttl, \
          dedicated_worker, ws_error_handler_muted, priority, restart_unless_cancelled, \
          delete_after_use, timeout, concurrency_key, visible_to_runner_only, no_main_func, codebase, has_preprocessor, on_behalf_of_email, schema_validation, assets) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::json, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::json, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25::jsonb, $26, $27, $28, $29, $30, $31, $32, $33, $34)",
         &w_id,
         &hash.0,
         ns.path,
@@ -791,7 +792,7 @@ async fn create_script_internal<'c>(
         ns.ws_error_handler_muted.unwrap_or(false),
         ns.priority,
         ns.restart_unless_cancelled,
-        ns.delete_after_use,
+        ns.delete_after_use.as_ref().and_then(|d| serde_json::to_value(d).ok()),
         ns.timeout,
         ns.concurrency_key,
         ns.visible_to_runner_only,

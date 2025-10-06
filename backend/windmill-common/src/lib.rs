@@ -507,7 +507,7 @@ pub struct ScriptHashInfo {
     pub language: ScriptLang,
     pub dedicated_worker: Option<bool>,
     pub priority: Option<i16>,
-    pub delete_after_use: Option<bool>,
+    pub delete_after_use: Option<scripts::DeleteAfterUseOptions>,
     pub timeout: Option<i32>,
     pub has_preprocessor: Option<bool>,
     pub on_behalf_of_email: Option<String>,
@@ -649,7 +649,7 @@ async fn get_script_info_for_hash_inner<'e, E: sqlx::PgExecutor<'e>>(
 ) -> error::Result<Option<ScriptHashInfo>> {
     let r = sqlx::query_as!(
         ScriptHashInfo,
-        "select hash, tag, concurrency_key, concurrent_limit, concurrency_time_window_s, cache_ttl, language as \"language: ScriptLang\", dedicated_worker, priority, delete_after_use, timeout, has_preprocessor, on_behalf_of_email, created_by, path from script where hash = $1 AND workspace_id = $2",
+        "select hash, tag, concurrency_key, concurrent_limit, concurrency_time_window_s, cache_ttl, language as \"language: ScriptLang\", dedicated_worker, priority, delete_after_use as \"delete_after_use: _\", timeout, has_preprocessor, on_behalf_of_email, created_by, path from script where hash = $1 AND workspace_id = $2",
         hash,
         w_id
     )

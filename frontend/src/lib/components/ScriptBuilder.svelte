@@ -1410,18 +1410,100 @@
 											<Toggle
 												disabled={!$enterpriseLicense}
 												size="sm"
-												checked={Boolean(script.delete_after_use)}
+												checked={Boolean(
+													script.delete_after_use?.args ||
+														script.delete_after_use?.logs ||
+														script.delete_after_use?.results
+												)}
 												on:change={() => {
-													if (script.delete_after_use) {
+													if (
+														script.delete_after_use?.args ||
+														script.delete_after_use?.logs ||
+														script.delete_after_use?.results
+													) {
 														script.delete_after_use = undefined
 													} else {
-														script.delete_after_use = true
+														script.delete_after_use = {
+															args: true,
+															logs: true,
+															results: true
+														}
 													}
 												}}
 												options={{
-													right: 'Delete logs, arguments and results after use'
+													right: 'Delete after use'
 												}}
 											/>
+											{#if script.delete_after_use}
+												<div class="ml-6 flex flex-col gap-1.5 text-sm">
+													<label class="flex items-center gap-2 cursor-pointer">
+														<input
+															type="checkbox"
+															disabled={!$enterpriseLicense}
+															checked={Boolean(script.delete_after_use?.args)}
+															onchange={() => {
+																if (!script.delete_after_use) {
+																	script.delete_after_use = {}
+																}
+																script.delete_after_use.args = !script.delete_after_use.args
+																if (
+																	!script.delete_after_use.args &&
+																	!script.delete_after_use.logs &&
+																	!script.delete_after_use.results
+																) {
+																	script.delete_after_use = undefined
+																}
+															}}
+															class="rounded"
+														/>
+														<span>Arguments</span>
+													</label>
+													<label class="flex items-center gap-2 cursor-pointer">
+														<input
+															type="checkbox"
+															disabled={!$enterpriseLicense}
+															checked={Boolean(script.delete_after_use?.logs)}
+															onchange={() => {
+																if (!script.delete_after_use) {
+																	script.delete_after_use = {}
+																}
+																script.delete_after_use.logs = !script.delete_after_use.logs
+																if (
+																	!script.delete_after_use.args &&
+																	!script.delete_after_use.logs &&
+																	!script.delete_after_use.results
+																) {
+																	script.delete_after_use = undefined
+																}
+															}}
+															class="rounded"
+														/>
+														<span>Logs</span>
+													</label>
+													<label class="flex items-center gap-2 cursor-pointer">
+														<input
+															type="checkbox"
+															disabled={!$enterpriseLicense}
+															checked={Boolean(script.delete_after_use?.results)}
+															onchange={() => {
+																if (!script.delete_after_use) {
+																	script.delete_after_use = {}
+																}
+																script.delete_after_use.results = !script.delete_after_use.results
+																if (
+																	!script.delete_after_use.args &&
+																	!script.delete_after_use.logs &&
+																	!script.delete_after_use.results
+																) {
+																	script.delete_after_use = undefined
+																}
+															}}
+															class="rounded"
+														/>
+														<span>Results</span>
+													</label>
+												</div>
+											{/if}
 										</div>
 									</Section>
 									{#if !isCloudHosted()}

@@ -384,7 +384,7 @@ pub struct FlowModule {
     // Priority at the flow step level
     pub priority: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    pub delete_after_use: Option<crate::scripts::DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub continue_on_error: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

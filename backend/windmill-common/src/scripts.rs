@@ -211,6 +211,43 @@ impl Display for ScriptKind {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(type_name = "jsonb")]
+pub struct DeleteAfterUseOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub results: Option<bool>,
+}
+
+impl DeleteAfterUseOptions {
+    pub fn should_delete_args(&self) -> bool {
+        self.args.unwrap_or(false)
+    }
+
+    pub fn should_delete_logs(&self) -> bool {
+        self.logs.unwrap_or(false)
+    }
+
+    pub fn should_delete_results(&self) -> bool {
+        self.results.unwrap_or(false)
+    }
+
+    pub fn all() -> Self {
+        Self {
+            args: Some(true),
+            logs: Some(true),
+            results: Some(true),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.should_delete_args() && !self.should_delete_logs() && !self.should_delete_results()
+    }
+}
+
 const PREVIEW_IS_CODEBASE_HASH: i64 = -42;
 const PREVIEW_IS_TAR_CODEBASE_HASH: i64 = -43;
 const PREVIEW_IS_ESM_CODEBASE_HASH: i64 = -44;
@@ -299,7 +336,8 @@ pub struct Script {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[sqlx(json)]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_unless_cancelled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -406,7 +444,7 @@ pub struct NewScript {
     pub ws_error_handler_muted: Option<bool>,
     pub priority: Option<i16>,
     pub timeout: Option<i32>,
-    pub delete_after_use: Option<bool>,
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     pub restart_unless_cancelled: Option<bool>,
     pub deployment_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

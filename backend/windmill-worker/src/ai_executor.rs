@@ -749,7 +749,7 @@ pub async fn run_agent(
                                             concurrency_time_window_s,
                                             &tool.module,
                                             tag,
-                                            tool.module.delete_after_use.unwrap_or(false),
+                                            tool.module.delete_after_use.clone(),
                                         );
                                         payload
                                     }

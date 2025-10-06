@@ -20,6 +20,16 @@ externalDocs:
 
 components:
   schemas:
+    DeleteAfterUseOptions:
+      type: object
+      properties:
+        args:
+          type: boolean
+        logs:
+          type: boolean
+        results:
+          type: boolean
+
     OpenFlow:
       type: object
       properties:
@@ -136,7 +146,7 @@ components:
         timeout:
           $ref: "#/components/schemas/InputTransform"
         delete_after_use:
-          type: boolean
+          $ref: "#/components/schemas/DeleteAfterUseOptions"
         summary:
           type: string
         mock:
