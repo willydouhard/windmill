@@ -39,6 +39,7 @@ Windmill uses a workspace-based architecture with multiple crates:
 - Leverage existing database helper functions in `db.rs` modules
 - Use transactions for multi-step operations
 - Handle database errors properly
+- Do not forget to run `cargo sqlx migrate run` after adding a migration
 
 ### API Endpoints
 
