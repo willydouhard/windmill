@@ -42,12 +42,6 @@
 			flowModule.delete_after_use = config
 		}
 	}
-
-	// Check if any deletion is enabled
-	function hasAnyDeletion() {
-		const config = getConfig()
-		return config.args || config.logs || config.results
-	}
 </script>
 
 <Section label="Delete after use">
