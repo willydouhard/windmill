@@ -29,6 +29,48 @@ use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize};
 
 use crate::utils::StripPath;
 
+/// Granular control over what gets deleted after job completion
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct DeleteAfterUseOptions {
+    #[serde(default)]
+    pub args: bool,
+    #[serde(default)]
+    pub logs: bool,
+    #[serde(default)]
+    pub results: bool,
+}
+
+impl DeleteAfterUseOptions {
+    /// Create a new DeleteAfterUseOptions with all options enabled
+    pub fn all() -> Self {
+        Self { args: true, logs: true, results: true }
+    }
+
+    /// Create a new DeleteAfterUseOptions with no options enabled
+    pub fn none() -> Self {
+        Self { args: false, logs: false, results: false }
+    }
+
+    /// Check if any deletion option is enabled
+    pub fn is_any_enabled(&self) -> bool {
+        self.args || self.logs || self.results
+    }
+
+    /// Check if all deletion options are enabled
+    pub fn is_all_enabled(&self) -> bool {
+        self.args && self.logs && self.results
+    }
+
+    /// Convert from boolean (for backward compatibility)
+    pub fn from_bool(value: bool) -> Self {
+        if value {
+            Self::all()
+        } else {
+            Self::none()
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Hash, Eq, sqlx::Type, Default)]
 #[sqlx(type_name = "SCRIPT_LANG", rename_all = "lowercase")]
 #[serde(rename_all(serialize = "lowercase", deserialize = "lowercase"))]
@@ -299,7 +341,8 @@ pub struct Script {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[sqlx(json(nullable))]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_unless_cancelled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -406,7 +449,8 @@ pub struct NewScript {
     pub ws_error_handler_muted: Option<bool>,
     pub priority: Option<i16>,
     pub timeout: Option<i32>,
-    pub delete_after_use: Option<bool>,
+    #[serde(deserialize_with = "delete_after_use_deserialize", default)]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     pub restart_unless_cancelled: Option<bool>,
     pub deployment_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -418,6 +462,27 @@ pub struct NewScript {
     pub on_behalf_of_email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assets: Option<Vec<AssetWithAltAccessType>>,
+}
+
+/// Deserializer for delete_after_use that handles both boolean (legacy) and object (new) formats
+fn delete_after_use_deserialize<'de, D>(
+    deserializer: D,
+) -> Result<Option<DeleteAfterUseOptions>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DeleteAfterUseValue {
+        Bool(bool),
+        Options(DeleteAfterUseOptions),
+    }
+
+    let value = Option::<DeleteAfterUseValue>::deserialize(deserializer)?;
+    Ok(value.map(|v| match v {
+        DeleteAfterUseValue::Bool(b) => DeleteAfterUseOptions::from_bool(b),
+        DeleteAfterUseValue::Options(opts) => opts,
+    }))
 }
 
 fn lock_deserialize<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>

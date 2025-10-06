@@ -25,7 +25,7 @@ use crate::{
     db::DB,
     error::Error,
     more_serde::{default_empty_string, default_id, default_null, default_true, is_default},
-    scripts::{Schema, ScriptHash, ScriptLang},
+    scripts::{DeleteAfterUseOptions, Schema, ScriptHash, ScriptLang},
     worker::{to_raw_value, Connection},
 };
 
@@ -384,7 +384,8 @@ pub struct FlowModule {
     // Priority at the flow step level
     pub priority: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delete_after_use: Option<bool>,
+    #[serde(deserialize_with = "delete_after_use_deserialize", default)]
+    pub delete_after_use: Option<DeleteAfterUseOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub continue_on_error: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -538,6 +539,27 @@ impl TryFrom<UntaggedInputTransform> for InputTransform {
 enum RawValueOrFormatted<T> {
     RawValue(T),
     Formatted { r#type: String, value: Option<T>, expr: Option<String> },
+}
+
+/// Deserializer for delete_after_use that handles both boolean (legacy) and object (new) formats
+fn delete_after_use_deserialize<'de, D>(
+    deserializer: D,
+) -> Result<Option<DeleteAfterUseOptions>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DeleteAfterUseValue {
+        Bool(bool),
+        Options(DeleteAfterUseOptions),
+    }
+
+    let value = Option::<DeleteAfterUseValue>::deserialize(deserializer)?;
+    Ok(value.map(|v| match v {
+        DeleteAfterUseValue::Bool(b) => DeleteAfterUseOptions::from_bool(b),
+        DeleteAfterUseValue::Options(opts) => opts,
+    }))
 }
 
 fn raw_value_to_input_transform<'de, D, T>(

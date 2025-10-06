@@ -1394,8 +1394,7 @@
 												triggered using a synchronous endpoint to have the desired effect.
 												<br />
 												<br />
-												The logs, arguments and results of the job will be completely deleted from Windmill
-												once it is complete and the result has been returned.
+												Control what data gets deleted once the job is complete and the result has been returned.
 												<br />
 												<br />
 												The deletion is irreversible.
@@ -1415,13 +1414,95 @@
 													if (script.delete_after_use) {
 														script.delete_after_use = undefined
 													} else {
-														script.delete_after_use = true
+														script.delete_after_use = { args: true, logs: true, results: true }
 													}
 												}}
 												options={{
-													right: 'Delete logs, arguments and results after use'
+													right: 'Delete data after use'
 												}}
 											/>
+											{#if script.delete_after_use}
+												<div class="flex flex-col gap-1 ml-4">
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="xs"
+														checked={
+															typeof script.delete_after_use === 'boolean'
+																? true
+																: script.delete_after_use?.args ?? false
+														}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean') {
+																script.delete_after_use = {
+																	args: false,
+																	logs: true,
+																	results: true
+																}
+															} else if (script.delete_after_use) {
+																script.delete_after_use = {
+																	...script.delete_after_use,
+																	args: !script.delete_after_use.args
+																}
+															}
+														}}
+														options={{
+															right: 'Delete arguments (inputs)'
+														}}
+													/>
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="xs"
+														checked={
+															typeof script.delete_after_use === 'boolean'
+																? true
+																: script.delete_after_use?.logs ?? false
+														}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean') {
+																script.delete_after_use = {
+																	args: true,
+																	logs: false,
+																	results: true
+																}
+															} else if (script.delete_after_use) {
+																script.delete_after_use = {
+																	...script.delete_after_use,
+																	logs: !script.delete_after_use.logs
+																}
+															}
+														}}
+														options={{
+															right: 'Delete logs'
+														}}
+													/>
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="xs"
+														checked={
+															typeof script.delete_after_use === 'boolean'
+																? true
+																: script.delete_after_use?.results ?? false
+														}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean') {
+																script.delete_after_use = {
+																	args: true,
+																	logs: true,
+																	results: false
+																}
+															} else if (script.delete_after_use) {
+																script.delete_after_use = {
+																	...script.delete_after_use,
+																	results: !script.delete_after_use.results
+																}
+															}
+														}}
+														options={{
+															right: 'Delete results (outputs)'
+														}}
+													/>
+												</div>
+											{/if}
 										</div>
 									</Section>
 									{#if !isCloudHosted()}

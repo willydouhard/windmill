@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::flows::FlowValue;
+use crate::scripts::DeleteAfterUseOptions;
 
 const MINUTES: Duration = Duration::from_secs(60);
 const HOURS: Duration = MINUTES.saturating_mul(60);
@@ -106,11 +107,23 @@ pub struct FlowStatusModuleWParent {
     pub module_status: FlowStatusModule,
 }
 
+/// Information about what to delete for a specific job
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct JobCleanupInfo {
+    pub id: Uuid,
+    #[serde(flatten)]
+    pub options: DeleteAfterUseOptions,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct FlowCleanupModule {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub flow_jobs_to_clean: Vec<Uuid>,
+    /// New granular cleanup info. When present, this takes precedence over flow_jobs_to_clean
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub flow_jobs_to_clean_v2: Vec<JobCleanupInfo>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -503,7 +516,7 @@ impl FlowStatus {
             } else {
                 None
             },
-            cleanup_module: FlowCleanupModule { flow_jobs_to_clean: vec![] },
+            cleanup_module: FlowCleanupModule { flow_jobs_to_clean: vec![], flow_jobs_to_clean_v2: vec![] },
             retry: RetryStatus { fail_count: 0, failed_jobs: vec![] },
             restarted_from: None,
             user_states: HashMap::new(),

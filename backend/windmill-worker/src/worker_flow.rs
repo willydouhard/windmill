@@ -1390,7 +1390,7 @@ pub async fn update_flow_status_after_job_completion_internal(
         }
         #[cfg(feature = "enterprise")]
         if let Some(parent_job) = flow_job.parent_job {
-            // if has parent job, append flow cleanup modules to parent job
+            // if has parent job, append flow cleanup modules to parent job (backward compat)
             if !_cleanup_module.flow_jobs_to_clean.is_empty() {
                 let uuids_json = serde_json::to_value(&_cleanup_module.flow_jobs_to_clean)
                     .map_err(|e| {
@@ -1407,11 +1407,29 @@ pub async fn update_flow_status_after_job_completion_internal(
                 .warn_after_seconds(3)
                 .await?;
             }
+            // New v2 granular cleanup
+            if !_cleanup_module.flow_jobs_to_clean_v2.is_empty() {
+                let cleanup_json = serde_json::to_value(&_cleanup_module.flow_jobs_to_clean_v2)
+                    .map_err(|e| {
+                        error::Error::internal_err(format!("Unable to serialize cleanup info: {e:#}"))
+                    })?;
+                sqlx::query!(
+                    "UPDATE v2_job_status
+                    SET flow_status = JSONB_SET(flow_status, ARRAY['cleanup_module', 'flow_jobs_to_clean_v2'], COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean_v2', '[]'::jsonb) || $1)
+                    WHERE id = $2",
+                    cleanup_json,
+                    parent_job
+                )
+                .execute(db)
+                .warn_after_seconds(3)
+                .await?;
+            }
         } else {
             // run the cleanup step only when the root job is complete
+            // Handle legacy cleanup (backward compat - delete all)
             if !_cleanup_module.flow_jobs_to_clean.is_empty() {
                 tracing::debug!(
-                     "Cleaning up jobs arguments, result and logs as they were marked as delete_after_use {:?}",
+                     "Cleaning up jobs (legacy all) as they were marked as delete_after_use {:?}",
                      _cleanup_module.flow_jobs_to_clean
                  );
                 sqlx::query!(
@@ -1421,7 +1439,7 @@ pub async fn update_flow_status_after_job_completion_internal(
                 .execute(db)
                 .await
                 .map_err(|e| {
-                    Error::InternalErr(format!("error while cleaning up completed job: {e:#}"))
+                    Error::InternalErr(format!("error while cleaning up completed job args: {e:#}"))
                 })?;
                 sqlx::query!(
                     "UPDATE v2_job_completed SET result = '{}'::jsonb WHERE id = ANY($1)",
@@ -1430,8 +1448,56 @@ pub async fn update_flow_status_after_job_completion_internal(
                 .execute(db)
                 .await
                 .map_err(|e| {
-                    Error::internal_err(format!("error while cleaning up completed job: {e:#}"))
+                    Error::internal_err(format!("error while cleaning up completed job result: {e:#}"))
                 })?;
+            }
+
+            // Handle new v2 granular cleanup
+            if !_cleanup_module.flow_jobs_to_clean_v2.is_empty() {
+                tracing::debug!(
+                     "Cleaning up jobs (granular) with delete_after_use options: {:?}",
+                     _cleanup_module.flow_jobs_to_clean_v2
+                 );
+
+                // Group jobs by what needs to be deleted
+                let mut jobs_to_delete_args: Vec<uuid::Uuid> = vec![];
+                let mut jobs_to_delete_results: Vec<uuid::Uuid> = vec![];
+
+                for job_cleanup in &_cleanup_module.flow_jobs_to_clean_v2 {
+                    if job_cleanup.options.args {
+                        jobs_to_delete_args.push(job_cleanup.id);
+                    }
+                    if job_cleanup.options.results {
+                        jobs_to_delete_results.push(job_cleanup.id);
+                    }
+                    // Note: logs deletion is handled separately below
+                }
+
+                // Delete args
+                if !jobs_to_delete_args.is_empty() {
+                    sqlx::query!(
+                        "UPDATE v2_job SET args = '{}'::jsonb WHERE id = ANY($1)",
+                        &jobs_to_delete_args,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::internal_err(format!("error while cleaning up job args: {e:#}"))
+                    })?;
+                }
+
+                // Delete results
+                if !jobs_to_delete_results.is_empty() {
+                    sqlx::query!(
+                        "UPDATE v2_job_completed SET result = '{}'::jsonb WHERE id = ANY($1)",
+                        &jobs_to_delete_results,
+                    )
+                    .execute(db)
+                    .await
+                    .map_err(|e| {
+                        Error::internal_err(format!("error while cleaning up job results: {e:#}"))
+                    })?;
+                }
             }
         }
 
@@ -3192,21 +3258,27 @@ async fn push_next_flow_job(
             }
         }
 
-        if payload_tag.delete_after_use {
-            let uuid_singleton_json = serde_json::to_value(&[uuid]).map_err(|e| {
-                error::Error::internal_err(format!("Unable to serialize uuid: {e:#}"))
-            })?;
+        if let Some(delete_opts) = &payload_tag.delete_after_use {
+            if delete_opts.is_any_enabled() {
+                let cleanup_info = windmill_common::flow_status::JobCleanupInfo {
+                    id: uuid,
+                    options: delete_opts.clone(),
+                };
+                let cleanup_info_json = serde_json::to_value(&[cleanup_info]).map_err(|e| {
+                    error::Error::internal_err(format!("Unable to serialize cleanup info: {e:#}"))
+                })?;
 
-            sqlx::query!(
-                 "UPDATE v2_job_status
-                 SET flow_status = JSONB_SET(flow_status, ARRAY['cleanup_module', 'flow_jobs_to_clean'], COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean', '[]'::jsonb) || $1)
-                 WHERE id = $2",
-                 uuid_singleton_json,
-                 flow_innermost_root_job.unwrap_or(flow_job.id)
-             )
-             .execute(&mut *inner_tx)
-             .warn_after_seconds(3)
-             .await?;
+                sqlx::query!(
+                     "UPDATE v2_job_status
+                     SET flow_status = JSONB_SET(flow_status, ARRAY['cleanup_module', 'flow_jobs_to_clean_v2'], COALESCE(flow_status->'cleanup_module'->'flow_jobs_to_clean_v2', '[]'::jsonb) || $1)
+                     WHERE id = $2",
+                     cleanup_info_json,
+                     flow_innermost_root_job.unwrap_or(flow_job.id)
+                 )
+                 .execute(&mut *inner_tx)
+                 .warn_after_seconds(3)
+                 .await?;
+            }
         }
 
         tx = inner_tx;
@@ -3545,7 +3617,7 @@ enum NextStatus {
 pub struct JobPayloadWithTag {
     pub payload: JobPayload,
     pub tag: Option<String>,
-    pub delete_after_use: bool,
+    pub delete_after_use: Option<windmill_common::scripts::DeleteAfterUseOptions>,
     pub timeout: Option<i32>,
     pub on_behalf_of: Option<OnBehalfOf>,
 }
@@ -3643,7 +3715,7 @@ async fn compute_next_flow_transform(
             ContinuePayload::SingleJob(JobPayloadWithTag {
                 payload: JobPayload::Identity,
                 tag: None,
-                delete_after_use: false,
+                delete_after_use: None,
                 timeout: None,
                 on_behalf_of: None,
             }),
@@ -3655,14 +3727,14 @@ async fn compute_next_flow_transform(
             ContinuePayload::SingleJob(JobPayloadWithTag {
                 payload,
                 tag: None,
-                delete_after_use: false,
+                delete_after_use: None,
                 timeout: None,
                 on_behalf_of: None,
             }),
             NextStatus::NextStep,
         ))
     };
-    let delete_after_use = module.delete_after_use.unwrap_or(false);
+    let delete_after_use = module.delete_after_use.clone();
 
     tracing::debug!(id = %flow_job.id, "computing next flow transform for {:?}", &module.value);
     if is_skipped {
@@ -3895,7 +3967,7 @@ async fn compute_next_flow_transform(
                             Some(JobPayloadWithTag {
                                 payload,
                                 tag: None,
-                                delete_after_use,
+                                delete_after_use: delete_after_use.clone(),
                                 timeout: None,
                                 on_behalf_of: None,
                             })
@@ -4022,7 +4094,7 @@ async fn compute_next_flow_transform(
                                     Some(JobPayloadWithTag {
                                         payload,
                                         tag: None,
-                                        delete_after_use,
+                                        delete_after_use: delete_after_use.clone(),
                                         timeout: None,
                                         on_behalf_of: None,
                                     })
@@ -4125,7 +4197,7 @@ async fn next_loop_iteration(
     is_simple: bool,
     db: &sqlx::Pool<sqlx::Postgres>,
     module: &FlowModule,
-    delete_after_use: bool,
+    delete_after_use: Option<windmill_common::scripts::DeleteAfterUseOptions>,
 ) -> Result<NextFlowTransform, Error> {
     let inner_path = || format!("{}/loop-{}", flow_job.runnable_path(), ns.index);
     if is_simple {
@@ -4338,10 +4410,10 @@ async fn payload_from_simple_module(
     module: &FlowModule,
     inner_path: String,
 ) -> Result<JobPayloadWithTag, Error> {
-    let delete_after_use = module.delete_after_use.unwrap_or(false);
+    let delete_after_use = module.delete_after_use.clone();
     Ok(match value {
         FlowModuleValue::Flow { path, .. } => {
-            flow_to_payload(path, delete_after_use, &flow_job.workspace_id, db).await?
+            flow_to_payload(path, delete_after_use.clone(), &flow_job.workspace_id, db).await?
         }
         FlowModuleValue::Script { path: script_path, hash: script_hash, tag_override, .. } => {
             script_to_payload(
@@ -4415,7 +4487,7 @@ pub fn raw_script_to_payload(
     concurrency_time_window_s: Option<i32>,
     module: &FlowModule,
     tag: Option<String>,
-    delete_after_use: bool,
+    delete_after_use: Option<windmill_common::scripts::DeleteAfterUseOptions>,
 ) -> JobPayloadWithTag {
     JobPayloadWithTag {
         payload: JobPayload::Code(RawCode {
@@ -4439,7 +4511,7 @@ pub fn raw_script_to_payload(
 
 async fn flow_to_payload(
     path: String,
-    delete_after_use: bool,
+    delete_after_use: Option<windmill_common::scripts::DeleteAfterUseOptions>,
     w_id: &str,
     db: &DB,
 ) -> Result<JobPayloadWithTag, Error> {
@@ -4531,9 +4603,17 @@ pub async fn script_to_payload(
             on_behalf_of,
         )
     };
-    // the module value overrides the value set at the script level. Defaults to false if both are unset.
-    let final_delete_after_user =
-        module.delete_after_use.unwrap_or(false) || delete_after_use.unwrap_or(false);
+    // the module value overrides the value set at the script level. Defaults to None if both are unset.
+    // If either has delete options set, merge them (OR logic: delete if either says delete)
+    let final_delete_after_use = match (&module.delete_after_use, &delete_after_use) {
+        (Some(module_opts), Some(script_opts)) => Some(windmill_common::scripts::DeleteAfterUseOptions {
+            args: module_opts.args || script_opts.args,
+            logs: module_opts.logs || script_opts.logs,
+            results: module_opts.results || script_opts.results,
+        }),
+        (Some(opts), None) | (None, Some(opts)) => Some(opts.clone()),
+        (None, None) => None,
+    };
 
     let flow_step_timeout = if module.timeout.is_some() {
         None
@@ -4543,7 +4623,7 @@ pub async fn script_to_payload(
     Ok(JobPayloadWithTag {
         payload,
         tag,
-        delete_after_use: final_delete_after_user,
+        delete_after_use: final_delete_after_use,
         timeout: flow_step_timeout,
         on_behalf_of,
     })

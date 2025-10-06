@@ -22,7 +22,7 @@ use crate::{
     flow_status::{FlowStatus, RestartedFrom},
     flows::{FlowNodeId, FlowValue, Retry},
     get_latest_deployed_hash_for_path, get_latest_flow_version_info_for_path,
-    scripts::{get_full_hub_script_by_path, ScriptHash, ScriptLang},
+    scripts::{self, get_full_hub_script_by_path, ScriptHash, ScriptLang},
     users::username_to_permissioned_as,
     utils::{StripPath, HTTP_CLIENT},
     worker::{to_raw_value, CUSTOM_TAGS_PER_WORKSPACE, TMP_DIR},
@@ -476,7 +476,7 @@ pub async fn script_path_to_payload<'e>(
 ) -> error::Result<(
     JobPayload,
     Option<Tag>,
-    Option<bool>,
+    Option<scripts::DeleteAfterUseOptions>,
     Option<i32>,
     Option<OnBehalfOf>,
 )> {
