@@ -1407,21 +1407,79 @@
 											</Tooltip>
 										{/snippet}
 										<div class="flex gap-2 shrink flex-col">
-											<Toggle
-												disabled={!$enterpriseLicense}
-												size="sm"
-												checked={Boolean(script.delete_after_use)}
-												on:change={() => {
-													if (script.delete_after_use) {
-														script.delete_after_use = undefined
-													} else {
-														script.delete_after_use = true
-													}
-												}}
-												options={{
-													right: 'Delete logs, arguments and results after use'
-												}}
-											/>
+											<div class="flex flex-col gap-2">
+												<div class="flex gap-2 items-center">
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="sm"
+														checked={Boolean(
+															typeof script.delete_after_use === 'object'
+																? script.delete_after_use?.args
+																: script.delete_after_use
+														)}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean' && script.delete_after_use) {
+																// Convert from boolean to object
+																script.delete_after_use = { logs: true, results: true, args: false }
+															} else if (typeof script.delete_after_use === 'object') {
+																script.delete_after_use.args = !script.delete_after_use.args
+															} else {
+																script.delete_after_use = { args: true }
+															}
+														}}
+														options={{ right: 'Delete arguments' }}
+													/>
+												</div>
+												<span class="text-xs text-tertiary">Remove the input arguments passed to this script</span>
+
+												<div class="flex gap-2 items-center">
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="sm"
+														checked={Boolean(
+															typeof script.delete_after_use === 'object'
+																? script.delete_after_use?.logs
+																: script.delete_after_use
+														)}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean' && script.delete_after_use) {
+																// Convert from boolean to object
+																script.delete_after_use = { args: true, results: true, logs: false }
+															} else if (typeof script.delete_after_use === 'object') {
+																script.delete_after_use.logs = !script.delete_after_use.logs
+															} else {
+																script.delete_after_use = { logs: true }
+															}
+														}}
+														options={{ right: 'Delete logs' }}
+													/>
+												</div>
+												<span class="text-xs text-tertiary">Remove the execution logs from this script</span>
+
+												<div class="flex gap-2 items-center">
+													<Toggle
+														disabled={!$enterpriseLicense}
+														size="sm"
+														checked={Boolean(
+															typeof script.delete_after_use === 'object'
+																? script.delete_after_use?.results
+																: script.delete_after_use
+														)}
+														on:change={() => {
+															if (typeof script.delete_after_use === 'boolean' && script.delete_after_use) {
+																// Convert from boolean to object
+																script.delete_after_use = { args: true, logs: true, results: false }
+															} else if (typeof script.delete_after_use === 'object') {
+																script.delete_after_use.results = !script.delete_after_use.results
+															} else {
+																script.delete_after_use = { results: true }
+															}
+														}}
+														options={{ right: 'Delete results' }}
+													/>
+												</div>
+												<span class="text-xs text-tertiary">Remove the output result from this script</span>
+											</div>
 										</div>
 									</Section>
 									{#if !isCloudHosted()}
