@@ -937,16 +937,13 @@ export const editCodeToolWithDiff: Tool<ScriptChatHelpers> = {
 				}
 			}
 
-			// Apply the code changes directly
-			await helpers.applyCode(updatedCode, { applyAll: true, mode: 'apply' })
-
-			// Show revert mode
-			await helpers.applyCode(oldCode, { mode: 'revert' })
+			// Show the changes in the editor with accept/reject UI
+			await helpers.applyCode(updatedCode)
 
 			toolCallbacks.setToolStatus(toolId, {
-				content: `Code changes applied`
+				content: `Code changes ready for review`
 			})
-			return `Applied changes to the script editor.`
+			return `Applied changes to the script editor. Review and accept/reject the changes.`
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
 			toolCallbacks.setToolStatus(toolId, {
@@ -984,17 +981,11 @@ export const editCodeTool: Tool<ScriptChatHelpers> = {
 		toolCallbacks.setToolStatus(toolId, { content: 'Applying code changes...' })
 
 		try {
-			// Save old code
-			const oldCode = scriptOptions.code
+			// Show the changes in the editor with accept/reject UI
+			await helpers.applyCode(args.code)
 
-			// Apply the code changes directly
-			await helpers.applyCode(args.code, { applyAll: true, mode: 'apply' })
-
-			// Show revert mode
-			await helpers.applyCode(oldCode, { mode: 'revert' })
-
-			toolCallbacks.setToolStatus(toolId, { content: 'Code changes applied' })
-			return 'Code has been applied to the script editor.'
+			toolCallbacks.setToolStatus(toolId, { content: 'Code changes ready for review' })
+			return 'Code has been applied to the script editor. Review and accept/reject the changes.'
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
 			toolCallbacks.setToolStatus(toolId, {
