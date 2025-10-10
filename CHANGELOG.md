@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.558.1](https://github.com/windmill-labs/windmill/compare/v1.558.0...v1.558.1) (2025-10-09)
+
+
+### Bug Fixes
+
+* support pg jsonb array ([#6788](https://github.com/windmill-labs/windmill/issues/6788)) ([1c9faf9](https://github.com/windmill-labs/windmill/commit/1c9faf9d03edd663e9a50161b9c37ac24bb3c422))
+
+## [1.558.0](https://github.com/windmill-labs/windmill/compare/v1.557.0...v1.558.0) (2025-10-09)
+
+
+### Features
+
+* allow setting custom cors header on http trigger ([#6786](https://github.com/windmill-labs/windmill/issues/6786)) ([705a177](https://github.com/windmill-labs/windmill/commit/705a1770054ff7f0f65729e9b7c71124bc4bf7a4))
+* **backend:** allow specifying powershell module versions ([#6781](https://github.com/windmill-labs/windmill/issues/6781)) ([bd3e5e6](https://github.com/windmill-labs/windmill/commit/bd3e5e67bbf44f6b1616bca7f926c068427625d4))
+* Database manager for Ducklake instance catalogs ([#6785](https://github.com/windmill-labs/windmill/issues/6785)) ([f798ff4](https://github.com/windmill-labs/windmill/commit/f798ff4535f44ce1c6258ce716277258d2d176ab))
+
+## [1.557.0](https://github.com/windmill-labs/windmill/compare/v1.556.1...v1.557.0) (2025-10-09)
+
+
+### Features
+
+* **flow:** show tool usage in flow conversations ([#6771](https://github.com/windmill-labs/windmill/issues/6771)) ([dc4582a](https://github.com/windmill-labs/windmill/commit/dc4582a1bbc7c0679bfbd4dd139cc14f7cc76ec5))
+
+
+### Bug Fixes
+
+* validate that instance group exists before adding to workspace ([#6777](https://github.com/windmill-labs/windmill/issues/6777)) ([b070ed9](https://github.com/windmill-labs/windmill/commit/b070ed955322f01c853427b9f725d104c9c9ea0e))
+
 ## [1.556.1](https://github.com/windmill-labs/windmill/compare/v1.556.0...v1.556.1) (2025-10-08)
 
 
