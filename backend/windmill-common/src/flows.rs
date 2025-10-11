@@ -355,6 +355,68 @@ pub struct Mock {
     pub return_value: Option<serde_json::Value>,
 }
 
+/// Configuration for what to delete after a job completes
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+#[serde(untagged)]
+pub enum DeleteAfterUseOptions {
+    /// Legacy boolean format for backward compatibility
+    Boolean(bool),
+    /// Granular control over what to delete
+    Granular {
+        #[serde(default)]
+        args: bool,
+        #[serde(default)]
+        logs: bool,
+        #[serde(default)]
+        result: bool,
+    },
+    #[default]
+    None,
+}
+
+impl DeleteAfterUseOptions {
+    /// Check if args should be deleted
+    pub fn delete_args(&self) -> bool {
+        match self {
+            DeleteAfterUseOptions::Boolean(true) => true,
+            DeleteAfterUseOptions::Granular { args, .. } => *args,
+            _ => false,
+        }
+    }
+
+    /// Check if logs should be deleted
+    pub fn delete_logs(&self) -> bool {
+        match self {
+            DeleteAfterUseOptions::Boolean(true) => true,
+            DeleteAfterUseOptions::Granular { logs, .. } => *logs,
+            _ => false,
+        }
+    }
+
+    /// Check if result should be deleted
+    pub fn delete_result(&self) -> bool {
+        match self {
+            DeleteAfterUseOptions::Boolean(true) => true,
+            DeleteAfterUseOptions::Granular { result, .. } => *result,
+            _ => false,
+        }
+    }
+
+    /// Check if any deletion is enabled
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            DeleteAfterUseOptions::Boolean(b) => *b,
+            DeleteAfterUseOptions::Granular { args, logs, result } => *args || *logs || *result,
+            DeleteAfterUseOptions::None => false,
+        }
+    }
+
+    /// Convert to a legacy boolean for backward compatibility
+    pub fn to_legacy_bool(&self) -> bool {
+        self.is_enabled()
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct FlowModule {
     #[serde(default = "default_id")]
